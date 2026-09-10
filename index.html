@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Падел Американо — 12 игроков</title>
+<style>
+  :root {
+    --court: #1F3B32;
+    --court-light: #2D5546;
+    --ball: #D7F23C;
+    --ball-dim: #eef7c8;
+    --bg: #F6F4EE;
+    --card: #FFFFFF;
+    --line: #E4E0D4;
+    --text: #21231F;
+    --text-dim: #6B6B62;
+    --danger: #B4472E;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 40px; }
+
+  header {
+    background: var(--court);
+    color: #fff;
+    padding: 22px 18px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  header::after {
+    content: "";
+    position: absolute; right: -30px; top: -30px;
+    width: 140px; height: 140px; border-radius: 50%;
+    background: var(--court-light);
+    z-index: 0;
+  }
+  header h1 {
+    margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+    position: relative; z-index: 1;
+  }
+  header p { margin: 6px 0 0; font-size: 13.5px; color: #C9D9CE; position: relative; z-index: 1; }
+
+  .setup { padding: 20px 18px; }
+  .setup label {
+    display: block; font-size: 12.5px; color: var(--text-dim); margin: 16px 0 6px;
+  }
+  .setup input[type=text] {
+    width: 100%; padding: 12px 13px; font-size: 16px;
+    border: 1.5px solid var(--line); border-radius: 10px;
+    background: var(--card); color: var(--text);
+  }
+  .setup input[type=text]:focus { outline: none; border-color: var(--court); }
+  .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .player-grid input { width: 100%; padding: 10px 11px; font-size: 15px; border: 1.5px solid var(--line); border-radius: 9px; }
+
+  .btn-primary {
+    width: 100%; margin-top: 22px; padding: 14px;
+    background: var(--court); color: #fff; border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:active { background: var(--court-light); }
+  .btn-secondary {
+    width: 100%; margin-top: 10px; padding: 12px;
+    background: transparent; color: var(--danger); border: 1.5px solid var(--line); border-radius: 12px;
+    font-size: 14.5px; font-weight: 600; cursor: pointer;
+  }
+
+  .tabs {
+    display: flex; gap: 6px; overflow-x: auto; padding: 12px 14px;
+    background: var(--bg); position: sticky; top: 0; z-index: 5;
+    border-bottom: 1px solid var(--line);
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: 0 0 auto; padding: 8px 14px; border-radius: 999px;
+    font-size: 14px; font-weight: 600; color: var(--text-dim);
+    background: var(--card); border: 1.5px solid var(--line); cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab.active { background: var(--court); color: #fff; border-color: var(--court); }
+  .tab.standings { color: var(--court); }
+  .tab.standings.active { background: var(--ball); color: var(--court); border-color: var(--ball); }
+
+  .round-view { padding: 16px; }
+  .round-title { font-size: 13px; color: var(--text-dim); margin: 0 0 14px; }
+
+  .court-card {
+    background: var(--card); border: 1.5px solid var(--line); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .court-label {
+    font-size: 12px; font-weight: 700; color: var(--court);
+    margin-bottom: 10px;
+  }
+  .match-row { display: flex; align-items: center; gap: 10px; }
+  .team { flex: 1; }
+  .team-names { font-size: 14.5px; font-weight: 600; line-height: 1.35; margin-bottom: 6px; }
+  .score-input {
+    width: 100%; padding: 10px 0; text-align: center; font-size: 20px; font-weight: 700;
+    border: 1.5px solid var(--line); border-radius: 9px; color: var(--court);
+    -moz-appearance: textfield;
+  }
+  .score-input::-webkit-outer-spin-button, .score-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .score-input:focus { outline: none; border-color: var(--court); }
+  .vs { font-size: 12px; color: var(--text-dim); font-weight: 700; padding-top: 20px; }
+  .court-card.done { border-color: var(--ball); }
+
+  .nav-row { display: flex; gap: 10px; margin-top: 6px; padding: 0 16px 6px; }
+  .nav-btn {
+    flex: 1; padding: 12px; border-radius: 11px; border: 1.5px solid var(--line);
+    background: var(--card); font-size: 14.5px; font-weight: 600; color: var(--text); cursor: pointer;
+  }
+  .nav-btn:disabled { opacity: 0.35; }
+
+  .standings-view { padding: 16px; }
+  .standings-note { font-size: 12.5px; color: var(--text-dim); margin: 0 0 14px; }
+  table.standings { width: 100%; border-collapse: collapse; }
+  table.standings th {
+    text-align: left; font-size: 11.5px; color: var(--text-dim); font-weight: 600;
+    padding: 0 8px 8px; border-bottom: 1.5px solid var(--line);
+  }
+  table.standings td {
+    padding: 12px 8px; font-size: 15px; border-bottom: 1px solid var(--line);
+  }
+  .rank-cell { width: 30px; font-weight: 700; color: var(--text-dim); }
+  .rank-cell.top { color: var(--court); }
+  .name-cell { font-weight: 600; }
+  .pts-cell { text-align: right; font-weight: 700; color: var(--court); font-size: 16px; }
+  .sub-cell { text-align: right; font-size: 12.5px; color: var(--text-dim); }
+
+  .footer-note { padding: 18px 20px 6px; font-size: 12px; color: var(--text-dim); text-align: center; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function() {
+  var STORAGE_KEY = "padel-tournament-v1";
+  var DEFAULT_NAMES = Array.from({length: 12}, function(_, i) { return ""; });
+
+  var state = {
+    started: false,
+    players: DEFAULT_NAMES.slice(),
+    scores: {},      // scores[roundIdx][courtIdx] = [scoreA, scoreB]
+    activeTab: "round-0"
+  };
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {}
+  }
+
+  function loadState(cb) {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        state = Object.assign(state, parsed);
+      }
+    } catch (e) {}
+    cb();
+  }
+
+  // ---- Round-robin schedule generator (circle method) ----
+  // 12 players -> 11 rounds, each round 6 pairs, grouped into 3 courts (2 pairs = 1 match)
+  function generateRounds() {
+    var n = 12;
+    var fixed = n - 1; // index 11
+    var rotating = [];
+    for (var i = 0; i < n - 1; i++) rotating.push(i);
+    var rounds = [];
+    for (var r = 0; r < n - 1; r++) {
+      var pairs = [];
+      pairs.push([fixed, rotating[0]]);
+      for (var k = 1; k <= 5; k++) {
+        pairs.push([rotating[k], rotating[11 - k]]);
+      }
+      var courts = [
+        [pairs[0], pairs[1]],
+        [pairs[2], pairs[3]],
+        [pairs[4], pairs[5]]
+      ];
+      rounds.push(courts);
+      rotating.unshift(rotating.pop());
+    }
+    return rounds;
+  }
+
+  var ROUNDS = generateRounds();
+  var editingNames = false;
+  var confirmingReset = false;
+
+  function playerName(idx) {
+    var n = state.players[idx];
+    return (n && n.trim()) ? n.trim() : ("Игрок " + (idx + 1));
+  }
+
+  function getScore(roundIdx, courtIdx, side) {
+    var r = state.scores[roundIdx];
+    if (!r) return "";
+    var c = r[courtIdx];
+    if (!c) return "";
+    var v = c[side];
+    return (v === undefined || v === null) ? "" : v;
+  }
+
+  function setScore(roundIdx, courtIdx, side, val) {
+    if (!state.scores[roundIdx]) state.scores[roundIdx] = {};
+    if (!state.scores[roundIdx][courtIdx]) state.scores[roundIdx][courtIdx] = [null, null];
+    state.scores[roundIdx][courtIdx][side] = val === "" ? null : Number(val);
+    saveState();
+  }
+
+  function computeStandings() {
+    var totals = {};
+    var wins = {};
+    var played = {};
+    for (var i = 0; i < 12; i++) { totals[i] = 0; wins[i] = 0; played[i] = 0; }
+
+    for (var r = 0; r < ROUNDS.length; r++) {
+      var courts = ROUNDS[r];
+      for (var c = 0; c < courts.length; c++) {
+        var teamA = courts[c][0], teamB = courts[c][1];
+        var sA = getScore(r, c, 0), sB = getScore(r, c, 1);
+        if (sA === "" || sB === "") continue;
+        sA = Number(sA); sB = Number(sB);
+        teamA.forEach(function(p) { totals[p] += sA; played[p] += 1; });
+        teamB.forEach(function(p) { totals[p] += sB; played[p] += 1; });
+        if (sA > sB) teamA.forEach(function(p) { wins[p] += 1; });
+        else if (sB > sA) teamB.forEach(function(p) { wins[p] += 1; });
+      }
+    }
+    var list = [];
+    for (var i = 0; i < 12; i++) {
+      list.push({ idx: i, name: playerName(i), pts: totals[i], wins: wins[i], played: played[i] });
+    }
+    list.sort(function(a, b) { return b.pts - a.pts || b.wins - a.wins; });
+    return list;
+  }
+
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      if (k === "class") e.className = attrs[k];
+      else if (k === "text") e.textContent = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    }
+    (children || []).forEach(function(c) { if (c) e.appendChild(c); });
+    return e;
+  }
+
+  function render() {
+    var app = document.getElementById("app");
+    app.innerHTML = "";
+
+    if (!state.started) {
+      app.appendChild(renderSetup());
+      return;
+    }
+
+    app.appendChild(renderHeader());
+
+    if (editingNames) {
+      app.appendChild(renderNameEditor());
+      var note0 = el("div", { class: "footer-note" });
+      note0.textContent = "Счёт по раундам не пострадает — меняются только имена.";
+      app.appendChild(note0);
+      return;
+    }
+
+    app.appendChild(renderTabs());
+
+    if (state.activeTab === "standings") {
+      app.appendChild(renderStandings());
+    } else {
+      var roundIdx = parseInt(state.activeTab.replace("round-", ""), 10);
+      app.appendChild(renderRound(roundIdx));
+      app.appendChild(renderNav(roundIdx));
+    }
+
+    var note = el("div", { class: "footer-note" });
+    note.textContent = "Данные сохраняются автоматически. Когда закончите — перенесите результаты в приложение Raketo.";
+    app.appendChild(note);
+  }
+
+  function renderHeader() {
+    var h = el("header", {}, [
+      el("h1", { text: "Падел Американо" }),
+      el("p", { text: "12 игроков · 3 корта · 11 раундов" })
+    ]);
+    var editBtn = el("button", {
+      text: editingNames ? "Готово" : "Имена",
+      style: "position:absolute; right:16px; top:20px; z-index:2; background:rgba(255,255,255,0.18); border:none; color:#fff; font-size:12.5px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer;"
+    });
+    editBtn.addEventListener("click", function() {
+      editingNames = !editingNames;
+      if (!editingNames) saveState();
+      render();
+    });
+    h.appendChild(editBtn);
+    return h;
+  }
+
+  function renderNameEditor() {
+    var wrap = el("div", { class: "setup" });
+    wrap.appendChild(el("label", { text: "Имена участников (12)" }));
+    var grid = el("div", { class: "player-grid" });
+    state.players.forEach(function(name, i) {
+      var input = el("input", { type: "text", placeholder: "Игрок " + (i + 1) });
+      input.value = name || "";
+      input.addEventListener("input", function(e) { state.players[i] = e.target.value; });
+      grid.appendChild(input);
+    });
+    wrap.appendChild(grid);
+    var doneBtn = el("button", { class: "btn-primary", text: "Готово" });
+    doneBtn.addEventListener("click", function() {
+      editingNames = false;
+      saveState();
+      render();
+    });
+    wrap.appendChild(doneBtn);
+    return wrap;
+  }
+
+  function renderSetup() {
+    var wrap = el("div", {});
+    wrap.appendChild(el("header", {}, [
+      el("h1", { text: "Падел Американо" }),
+      el("p", { text: "Впишите имена — таблица раундов соберётся сама" })
+    ]));
+    var body = el("div", { class: "setup" });
+    body.appendChild(el("label", { text: "Имена участников (12)" }));
+    var grid = el("div", { class: "player-grid" });
+    state.players.forEach(function(name, i) {
+      var input = el("input", { type: "text", placeholder: "Игрок " + (i + 1), value: name || "" });
+      input.value = name || "";
+      input.addEventListener("input", function(e) {
+        state.players[i] = e.target.value;
+      });
+      grid.appendChild(input);
+    });
+    body.appendChild(grid);
+
+    var startBtn = el("button", { class: "btn-primary", text: "Начать турнир" });
+    startBtn.addEventListener("click", function() {
+      state.started = true;
+      state.activeTab = "round-0";
+      saveState();
+      render();
+    });
+    body.appendChild(startBtn);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  function renderTabs() {
+    var tabs = el("div", { class: "tabs" });
+    for (var r = 0; r < ROUNDS.length; r++) {
+      (function(r) {
+        var t = el("div", { class: "tab" + (state.activeTab === ("round-" + r) ? " active" : ""), text: "Раунд " + (r + 1) });
+        t.addEventListener("click", function() { state.activeTab = "round-" + r; render(); });
+        tabs.appendChild(t);
+      })(r);
+    }
+    var st = el("div", { class: "tab standings" + (state.activeTab === "standings" ? " active" : ""), text: "🏆 Таблица" });
+    st.addEventListener("click", function() { state.activeTab = "standings"; render(); });
+    tabs.appendChild(st);
+    return tabs;
+  }
+
+  function renderRound(roundIdx) {
+    var view = el("div", { class: "round-view" });
+    view.appendChild(el("p", { class: "round-title", text: "Раунд " + (roundIdx + 1) + " из " + ROUNDS.length + " — впишите счёт каждого корта" }));
+
+    var courts = ROUNDS[roundIdx];
+    courts.forEach(function(court, cIdx) {
+      var teamA = court[0], teamB = court[1];
+      var sA = getScore(roundIdx, cIdx, 0);
+      var sB = getScore(roundIdx, cIdx, 1);
+      var done = sA !== "" && sB !== "";
+
+      var card = el("div", { class: "court-card" + (done ? " done" : "") });
+      card.appendChild(el("div", { class: "court-label", text: "Корт " + (cIdx + 1) }));
+
+      var row = el("div", { class: "match-row" });
+
+      var teamAEl = el("div", { class: "team" });
+      teamAEl.appendChild(el("div", { class: "team-names", text: teamA.map(playerName).join(" / ") }));
+      var inputA = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
+      inputA.value = sA;
+      inputA.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 0, e.target.value); updateDoneState(card); });
+      teamAEl.appendChild(inputA);
+
+      var vs = el("div", { class: "vs", text: "vs" });
+
+      var teamBEl = el("div", { class: "team" });
+      teamBEl.appendChild(el("div", { class: "team-names", text: teamB.map(playerName).join(" / ") }));
+      var inputB = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
+      inputB.value = sB;
+      inputB.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 1, e.target.value); updateDoneState(card); });
+      teamBEl.appendChild(inputB);
+
+      row.appendChild(teamAEl);
+      row.appendChild(vs);
+      row.appendChild(teamBEl);
+      card.appendChild(row);
+      view.appendChild(card);
+    });
+
+    return view;
+  }
+
+  function updateDoneState(card) {
+    var inputs = card.querySelectorAll(".score-input");
+    var a = inputs[0].value, b = inputs[1].value;
+    if (a !== "" && b !== "") card.classList.add("done");
+    else card.classList.remove("done");
+  }
+
+  function renderNav(roundIdx) {
+    var nav = el("div", { class: "nav-row" });
+    var prev = el("button", { class: "nav-btn", text: "← Раунд " + roundIdx });
+    prev.disabled = roundIdx === 0;
+    prev.addEventListener("click", function() { state.activeTab = "round-" + (roundIdx - 1); render(); });
+
+    var next = el("button", { class: "nav-btn", text: roundIdx === ROUNDS.length - 1 ? "Таблица →" : "Раунд " + (roundIdx + 2) + " →" });
+    next.addEventListener("click", function() {
+      state.activeTab = roundIdx === ROUNDS.length - 1 ? "standings" : "round-" + (roundIdx + 1);
+      render();
+    });
+
+    nav.appendChild(prev);
+    nav.appendChild(next);
+    return nav;
+  }
+
+  function renderStandings() {
+    var view = el("div", { class: "standings-view" });
+    var list = computeStandings();
+    var totalRounds = ROUNDS.length;
+    view.appendChild(el("p", { class: "standings-note", text: "Очки = сумма набранных игр/очков по всем сыгранным раундам" }));
+
+    var table = el("table", { class: "standings" });
+    var thead = el("tr", {}, [
+      el("th", { text: "#" }),
+      el("th", { text: "Игрок" }),
+      el("th", { text: "П" }),
+      el("th", { text: "Очки" })
+    ]);
+    table.appendChild(thead);
+
+    list.forEach(function(p, i) {
+      var row = el("tr", {}, [
+        el("td", { class: "rank-cell" + (i < 3 ? " top" : ""), text: (i + 1) }),
+        el("td", { class: "name-cell", text: p.name }),
+        el("td", { class: "sub-cell", text: p.wins }),
+        el("td", { class: "pts-cell", text: p.pts })
+      ]);
+      table.appendChild(row);
+    });
+
+    view.appendChild(table);
+
+    if (!confirmingReset) {
+      var resetBtn = el("button", { class: "btn-secondary", text: "Начать новый турнир" });
+      resetBtn.addEventListener("click", function() {
+        confirmingReset = true;
+        render();
+      });
+      view.appendChild(resetBtn);
+    } else {
+      view.appendChild(el("p", {
+        style: "font-size: 13px; color: var(--danger); text-align: center; margin: 16px 0 10px; font-weight: 600;",
+        text: "Точно сбросить все результаты и имена?"
+      }));
+      var confirmRow = el("div", { style: "display: flex; gap: 10px;" });
+      var yesBtn = el("button", {
+        text: "Да, сбросить всё",
+        style: "flex: 1; padding: 12px; border-radius: 12px; border: none; background: var(--danger); color: #fff; font-size: 14.5px; font-weight: 600; cursor: pointer;"
+      });
+      yesBtn.addEventListener("click", function() {
+        state = { started: false, players: DEFAULT_NAMES.slice(), scores: {}, activeTab: "round-0" };
+        confirmingReset = false;
+        saveState();
+        render();
+      });
+      var noBtn = el("button", { class: "btn-secondary", text: "Отмена" });
+      noBtn.setAttribute("style", "flex: 1; margin-top: 0;");
+      noBtn.addEventListener("click", function() {
+        confirmingReset = false;
+        render();
+      });
+      confirmRow.appendChild(yesBtn);
+      confirmRow.appendChild(noBtn);
+      view.appendChild(confirmRow);
+    }
+
+    return view;
+  }
+
+  loadState(render);
+})();
+</script>
+</body>
+</html>
