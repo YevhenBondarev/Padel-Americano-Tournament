@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Падел Американо — 12 игроков</title>
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='36' fill='%231F3B32'/%3E%3Ccircle cx='90' cy='74' r='32' fill='%23D7F23C'/%3E%3Crect x='58' y='118' width='64' height='12' rx='6' fill='%23D7F23C'/%3E%3C/svg%3E">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' rx='14' fill='%231F3B32'/%3E%3Ccircle cx='32' cy='27' r='12' fill='%23D7F23C'/%3E%3Crect x='21' y='42' width='22' height='5' rx='2.5' fill='%23D7F23C'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <meta name="theme-color" content="#1F3B32">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -203,9 +203,46 @@
     return rounds;
   }
 
-  var ROUNDS = generateRounds();
+  var DEFAULT_ROUNDS = generateRounds();
+  var NUM_ROUNDS = DEFAULT_ROUNDS.length; // 11
   var editingNames = false;
   var confirmingReset = false;
+
+  function defaultPairings() {
+    var p = {};
+    for (var r = 0; r < DEFAULT_ROUNDS.length; r++) {
+      p[r] = {};
+      for (var c = 0; c < DEFAULT_ROUNDS[r].length; c++) {
+        p[r][c] = [DEFAULT_ROUNDS[r][c][0].slice(), DEFAULT_ROUNDS[r][c][1].slice()];
+      }
+    }
+    return p;
+  }
+
+  function getPairing(r, c) {
+    if (state.pairings && state.pairings[r] && state.pairings[r][c]) return state.pairings[r][c];
+    var d = DEFAULT_ROUNDS[r][c];
+    return [d[0].slice(), d[1].slice()];
+  }
+
+  function setPairing(r, c, teamIdx, slotIdx, val) {
+    if (!state.pairings) state.pairings = defaultPairings();
+    if (!state.pairings[r]) state.pairings[r] = {};
+    if (!state.pairings[r][c]) state.pairings[r][c] = getPairing(r, c).map(function(t) { return t.slice(); });
+    state.pairings[r][c][teamIdx][slotIdx] = Number(val);
+    saveState();
+  }
+
+  function roundDuplicates(roundIdx) {
+    var counts = {};
+    for (var c = 0; c < 3; c++) {
+      var p = getPairing(roundIdx, c);
+      [p[0][0], p[0][1], p[1][0], p[1][1]].forEach(function(idx) { counts[idx] = (counts[idx] || 0) + 1; });
+    }
+    var dupes = [];
+    for (var k in counts) if (counts[k] > 1) dupes.push(Number(k));
+    return dupes;
+  }
 
   function playerName(idx) {
     var n = state.players[idx];
@@ -234,10 +271,10 @@
     var played = {};
     for (var i = 0; i < 12; i++) { totals[i] = 0; wins[i] = 0; played[i] = 0; }
 
-    for (var r = 0; r < ROUNDS.length; r++) {
-      var courts = ROUNDS[r];
-      for (var c = 0; c < courts.length; c++) {
-        var teamA = courts[c][0], teamB = courts[c][1];
+    for (var r = 0; r < NUM_ROUNDS; r++) {
+      for (var c = 0; c < 3; c++) {
+        var pairing = getPairing(r, c);
+        var teamA = pairing[0], teamB = pairing[1];
         var sA = getScore(r, c, 0), sB = getScore(r, c, 1);
         if (sA === "" || sB === "") continue;
         sA = Number(sA); sB = Number(sB);
@@ -362,6 +399,7 @@
     startBtn.addEventListener("click", function() {
       state.started = true;
       state.activeTab = "round-0";
+      if (!state.pairings) state.pairings = defaultPairings();
       saveState();
       render();
     });
@@ -372,7 +410,7 @@
 
   function renderTabs() {
     var tabs = el("div", { class: "tabs" });
-    for (var r = 0; r < ROUNDS.length; r++) {
+    for (var r = 0; r < NUM_ROUNDS; r++) {
       (function(r) {
         var t = el("div", { class: "tab" + (state.activeTab === ("round-" + r) ? " active" : ""), text: "Раунд " + (r + 1) });
         t.addEventListener("click", function() { state.activeTab = "round-" + r; render(); });
@@ -385,44 +423,69 @@
     return tabs;
   }
 
+  function playerSelect(currentVal, onChange) {
+    var sel = document.createElement("select");
+    sel.style.cssText = "width:100%; padding:8px 6px; font-size:13px; border:1.5px solid var(--line); border-radius:8px; margin-bottom:5px; background:var(--card); color:var(--text);";
+    for (var i = 0; i < 12; i++) {
+      var opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = playerName(i);
+      if (i === currentVal) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", function(e) { onChange(Number(e.target.value)); });
+    return sel;
+  }
+
   function renderRound(roundIdx) {
     var view = el("div", { class: "round-view" });
-    view.appendChild(el("p", { class: "round-title", text: "Раунд " + (roundIdx + 1) + " из " + ROUNDS.length + " — впишите счёт каждого корта" }));
+    view.appendChild(el("p", { class: "round-title", text: "Раунд " + (roundIdx + 1) + " из " + NUM_ROUNDS + " — выберите пары как в Raketo и впишите счёт" }));
 
-    var courts = ROUNDS[roundIdx];
-    courts.forEach(function(court, cIdx) {
-      var teamA = court[0], teamB = court[1];
-      var sA = getScore(roundIdx, cIdx, 0);
-      var sB = getScore(roundIdx, cIdx, 1);
-      var done = sA !== "" && sB !== "";
+    var dupes = roundDuplicates(roundIdx);
+    if (dupes.length) {
+      view.appendChild(el("p", {
+        style: "font-size: 12.5px; color: var(--danger); background: #F6E6E0; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px;",
+        text: "Играют больше раза за раунд: " + dupes.map(playerName).join(", ")
+      }));
+    }
 
-      var card = el("div", { class: "court-card" + (done ? " done" : "") });
-      card.appendChild(el("div", { class: "court-label", text: "Корт " + (cIdx + 1) }));
+    for (var cIdx = 0; cIdx < 3; cIdx++) {
+      (function(cIdx) {
+        var pairing = getPairing(roundIdx, cIdx);
+        var sA = getScore(roundIdx, cIdx, 0);
+        var sB = getScore(roundIdx, cIdx, 1);
+        var done = sA !== "" && sB !== "";
 
-      var row = el("div", { class: "match-row" });
+        var card = el("div", { class: "court-card" + (done ? " done" : "") });
+        card.appendChild(el("div", { class: "court-label", text: "Корт " + (cIdx + 1) }));
 
-      var teamAEl = el("div", { class: "team" });
-      teamAEl.appendChild(el("div", { class: "team-names", text: teamA.map(playerName).join(" / ") }));
-      var inputA = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
-      inputA.value = sA;
-      inputA.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 0, e.target.value); updateDoneState(card); });
-      teamAEl.appendChild(inputA);
+        var row = el("div", { class: "match-row" });
 
-      var vs = el("div", { class: "vs", text: "vs" });
+        var teamAEl = el("div", { class: "team" });
+        teamAEl.appendChild(playerSelect(pairing[0][0], function(v) { setPairing(roundIdx, cIdx, 0, 0, v); render(); }));
+        teamAEl.appendChild(playerSelect(pairing[0][1], function(v) { setPairing(roundIdx, cIdx, 0, 1, v); render(); }));
+        var inputA = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
+        inputA.value = sA;
+        inputA.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 0, e.target.value); updateDoneState(card); });
+        teamAEl.appendChild(inputA);
 
-      var teamBEl = el("div", { class: "team" });
-      teamBEl.appendChild(el("div", { class: "team-names", text: teamB.map(playerName).join(" / ") }));
-      var inputB = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
-      inputB.value = sB;
-      inputB.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 1, e.target.value); updateDoneState(card); });
-      teamBEl.appendChild(inputB);
+        var vs = el("div", { class: "vs", text: "vs" });
 
-      row.appendChild(teamAEl);
-      row.appendChild(vs);
-      row.appendChild(teamBEl);
-      card.appendChild(row);
-      view.appendChild(card);
-    });
+        var teamBEl = el("div", { class: "team" });
+        teamBEl.appendChild(playerSelect(pairing[1][0], function(v) { setPairing(roundIdx, cIdx, 1, 0, v); render(); }));
+        teamBEl.appendChild(playerSelect(pairing[1][1], function(v) { setPairing(roundIdx, cIdx, 1, 1, v); render(); }));
+        var inputB = el("input", { class: "score-input", type: "number", inputmode: "numeric", placeholder: "—" });
+        inputB.value = sB;
+        inputB.addEventListener("input", function(e) { setScore(roundIdx, cIdx, 1, e.target.value); updateDoneState(card); });
+        teamBEl.appendChild(inputB);
+
+        row.appendChild(teamAEl);
+        row.appendChild(vs);
+        row.appendChild(teamBEl);
+        card.appendChild(row);
+        view.appendChild(card);
+      })(cIdx);
+    }
 
     return view;
   }
@@ -440,9 +503,9 @@
     prev.disabled = roundIdx === 0;
     prev.addEventListener("click", function() { state.activeTab = "round-" + (roundIdx - 1); render(); });
 
-    var next = el("button", { class: "nav-btn", text: roundIdx === ROUNDS.length - 1 ? "Таблица →" : "Раунд " + (roundIdx + 2) + " →" });
+    var next = el("button", { class: "nav-btn", text: roundIdx === NUM_ROUNDS - 1 ? "Таблица →" : "Раунд " + (roundIdx + 2) + " →" });
     next.addEventListener("click", function() {
-      state.activeTab = roundIdx === ROUNDS.length - 1 ? "standings" : "round-" + (roundIdx + 1);
+      state.activeTab = roundIdx === NUM_ROUNDS - 1 ? "standings" : "round-" + (roundIdx + 1);
       render();
     });
 
@@ -454,7 +517,7 @@
   function renderStandings() {
     var view = el("div", { class: "standings-view" });
     var list = computeStandings();
-    var totalRounds = ROUNDS.length;
+    var totalRounds = NUM_ROUNDS;
     view.appendChild(el("p", { class: "standings-note", text: "Очки = сумма набранных игр/очков по всем сыгранным раундам" }));
 
     var table = el("table", { class: "standings" });
@@ -496,7 +559,7 @@
         style: "flex: 1; padding: 12px; border-radius: 12px; border: none; background: var(--danger); color: #fff; font-size: 14.5px; font-weight: 600; cursor: pointer;"
       });
       yesBtn.addEventListener("click", function() {
-        state = { started: false, players: DEFAULT_NAMES.slice(), scores: {}, activeTab: "round-0" };
+        state = { started: false, players: DEFAULT_NAMES.slice(), scores: {}, pairings: null, activeTab: "round-0" };
         confirmingReset = false;
         saveState();
         render();
