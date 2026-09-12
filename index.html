@@ -160,7 +160,8 @@
 
 <script>
 (function() {
-  var STORAGE_KEY = "padel-tournament-v2";
+  var STORAGE_KEY = "padel-app-v3";
+  var LEGACY_KEY = "padel-tournament-v2";
   var PLAYER_COUNT_OPTIONS = [4, 8, 12, 16, 20, 24];
 
   function emptyNames(n) { return Array.from({ length: n }, function() { return ""; }); }
@@ -174,30 +175,80 @@
     return Math.max(1, numPlayers - 1);
   }
 
-  var state = {
-    started: false,
-    editingNames: false,
-    mode: "individual",       // "individual" | "team"
-    numPlayers: 12,
-    numRounds: 11,
-    players: emptyNames(12),
-    teams: defaultTeams(12),  // used only in team mode
-    pairings: {},             // roundIdx -> courtIdx -> pairing (shape depends on mode)
-    scores: {},               // roundIdx -> courtIdx -> [scoreA, scoreB]
-    activeTab: "round-0"
-  };
+  function newTournament() {
+    return {
+      id: "t" + Date.now() + Math.floor(Math.random() * 1000),
+      name: "",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      started: false,
+      finished: false,
+      editingNames: false,
+      mode: "individual",       // "individual" | "team"
+      numPlayers: 12,
+      numRounds: 11,
+      players: emptyNames(12),
+      teams: defaultTeams(12),  // used only in team mode
+      pairings: {},             // roundIdx -> courtIdx -> pairing (shape depends on mode)
+      scores: {},               // roundIdx -> courtIdx -> [scoreA, scoreB]
+      activeTab: "round-0"
+    };
+  }
+
+  var store = { tournaments: [], currentId: null };
+  var state = newTournament();
+  var screen = "home";          // "home" | "tournament"
   var confirmingReset = false;
+  var confirmingDelete = null;  // tournament id pending deletion
+  var renamingId = null;
+
+  function tournamentTitle(t) {
+    if (t.name && t.name.trim()) return t.name.trim();
+    return "Турнир от " + formatDate(t.createdAt);
+  }
+  function formatDate(ts) {
+    var d = new Date(ts);
+    var months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+    return d.getDate() + " " + months[d.getMonth()] + " " + d.getFullYear();
+  }
+
+  function persist() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch (e) {}
+  }
 
   function saveState() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    state.updatedAt = Date.now();
+    var found = false;
+    for (var i = 0; i < store.tournaments.length; i++) {
+      if (store.tournaments[i].id === state.id) { store.tournaments[i] = state; found = true; break; }
+    }
+    if (!found) store.tournaments.push(state);
+    store.currentId = state.id;
+    persist();
   }
+
   function loadState(cb) {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) { var parsed = JSON.parse(raw); state = Object.assign(state, parsed); }
-    } catch (e) {}
+      if (raw) {
+        store = JSON.parse(raw);
+        if (!store.tournaments) store.tournaments = [];
+      } else {
+        // migrate a single tournament saved by the older version
+        var legacy = localStorage.getItem(LEGACY_KEY);
+        if (legacy) {
+          var old = JSON.parse(legacy);
+          var t = Object.assign(newTournament(), old);
+          t.name = "Перенесённый турнир";
+          store = { tournaments: [t], currentId: null };
+          persist();
+        }
+      }
+    } catch (e) { store = { tournaments: [], currentId: null }; }
+    screen = "home";
     cb();
   }
+
 
   function numCourts() { return Math.floor(state.numPlayers / 4); }
   function numTeams() { return Math.floor(state.numPlayers / 2); }
@@ -394,6 +445,8 @@
     var app = document.getElementById("app");
     app.innerHTML = "";
 
+    if (screen === "home") { app.appendChild(renderHome()); return; }
+
     if (!state.started) { app.appendChild(renderSetup()); return; }
 
     app.appendChild(renderHeader());
@@ -418,6 +471,140 @@
     app.appendChild(note);
   }
 
+  // ---------------- home / archive ----------------
+  function tournamentSummary(t) {
+    var prev = state;
+    state = t;
+    var courts = numCourts();
+    var filled = 0, total = t.numRounds * courts;
+    for (var r = 0; r < t.numRounds; r++) {
+      for (var c = 0; c < courts; c++) {
+        if (getScore(r, c, 0) !== "" && getScore(r, c, 1) !== "") filled++;
+      }
+    }
+    var leader = null;
+    if (filled > 0) {
+      var list = computeStandings();
+      if (list.length) leader = list[0];
+    }
+    state = prev;
+    return { filled: filled, total: total, leader: leader };
+  }
+
+  function renderHome() {
+    var wrap = el("div", {});
+    wrap.appendChild(el("header", {}, [
+      el("h1", { text: "Мои турниры" }),
+      el("p", { text: store.tournaments.length ? store.tournaments.length + " сохранено" : "Пока ничего не сохранено" })
+    ]));
+
+    var body = el("div", { class: "setup" });
+
+    var newBtn = el("button", { class: "btn-primary", text: "+ Новый турнир", style: "margin-top:0; margin-bottom:18px;" });
+    newBtn.addEventListener("click", function() {
+      state = newTournament();
+      screen = "tournament";
+      render();
+    });
+    body.appendChild(newBtn);
+
+    if (!store.tournaments.length) {
+      body.appendChild(el("p", { style: "font-size:13.5px; color:var(--text-dim); text-align:center; padding:20px 10px;", text: "Создайте турнир — он сохранится здесь автоматически, и вы сможете вернуться к нему в любой момент." }));
+      wrap.appendChild(body);
+      return wrap;
+    }
+
+    var sorted = store.tournaments.slice().sort(function(a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+
+    sorted.forEach(function(t) {
+      var card = el("div", { class: "setup-card", style: "margin-bottom:12px; padding:14px 16px;" });
+
+      if (renamingId === t.id) {
+        var nameInput = el("input", { type: "text", placeholder: "Название турнира" });
+        nameInput.value = t.name || "";
+        nameInput.addEventListener("input", function(e) { t.name = e.target.value; });
+        card.appendChild(nameInput);
+        var okBtn = el("button", { class: "btn-primary", text: "Сохранить название", style: "margin-top:10px; padding:10px; font-size:14.5px;" });
+        okBtn.addEventListener("click", function() {
+          renamingId = null;
+          t.updatedAt = Date.now();
+          persist();
+          render();
+        });
+        card.appendChild(okBtn);
+        body.appendChild(card);
+        return;
+      }
+
+      var s = tournamentSummary(t);
+      var modeLabel = t.mode === "team" ? "командный" : "одиночный";
+
+      var titleRow = el("div", { style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;" });
+      var titleBox = el("div", { style: "flex:1; min-width:0;" });
+      titleBox.appendChild(el("p", { style: "margin:0; font-size:16px; font-weight:700;", text: tournamentTitle(t) }));
+      titleBox.appendChild(el("p", { style: "margin:4px 0 0; font-size:12.5px; color:var(--text-dim);", text: formatDate(t.createdAt) + " · " + t.numPlayers + " игроков · " + modeLabel }));
+      titleRow.appendChild(titleBox);
+
+      var badge = el("span", {
+        style: "flex:0 0 auto; font-size:11.5px; font-weight:700; padding:5px 9px; border-radius:999px; " +
+               (s.filled >= s.total && s.total > 0
+                 ? "background:var(--ball); color:var(--court);"
+                 : "background:var(--bg); color:var(--text-dim); border:1px solid var(--line);"),
+        text: s.filled >= s.total && s.total > 0 ? "завершён" : s.filled + "/" + s.total
+      });
+      titleRow.appendChild(badge);
+      card.appendChild(titleRow);
+
+      if (s.leader) {
+        card.appendChild(el("p", { style: "margin:10px 0 0; font-size:13px; color:var(--court); font-weight:600;", text: "Лидер: " + s.leader.name + " — " + s.leader.pts + " очк." }));
+      }
+
+      var btnRow = el("div", { style: "display:flex; gap:8px; margin-top:12px;" });
+      var openBtn = el("button", { class: "nav-btn", text: "Открыть" });
+      openBtn.addEventListener("click", function() {
+        state = Object.assign(newTournament(), t);
+        state.editingNames = false;
+        screen = "tournament";
+        confirmingReset = false;
+        render();
+      });
+      var renameBtn = el("button", { class: "nav-btn", text: "Название" });
+      renameBtn.addEventListener("click", function() { renamingId = t.id; render(); });
+      btnRow.appendChild(openBtn);
+      btnRow.appendChild(renameBtn);
+      card.appendChild(btnRow);
+
+      if (confirmingDelete === t.id) {
+        card.appendChild(el("p", { style: "font-size:12.5px; color:var(--danger); margin:12px 0 8px; font-weight:600;", text: "Удалить этот турнир навсегда?" }));
+        var delRow = el("div", { style: "display:flex; gap:8px;" });
+        var yes = el("button", { text: "Удалить", style: "flex:1; padding:10px; border-radius:11px; border:none; background:var(--danger); color:#fff; font-size:14px; font-weight:600; cursor:pointer;" });
+        yes.addEventListener("click", function() {
+          store.tournaments = store.tournaments.filter(function(x) { return x.id !== t.id; });
+          if (store.currentId === t.id) store.currentId = null;
+          confirmingDelete = null;
+          persist();
+          render();
+        });
+        var no = el("button", { class: "nav-btn", text: "Отмена" });
+        no.addEventListener("click", function() { confirmingDelete = null; render(); });
+        delRow.appendChild(yes); delRow.appendChild(no);
+        card.appendChild(delRow);
+      } else {
+        var delBtn = el("button", {
+          text: "Удалить",
+          style: "width:100%; margin-top:8px; padding:9px; background:transparent; color:var(--danger); border:none; font-size:13px; font-weight:600; cursor:pointer;"
+        });
+        delBtn.addEventListener("click", function() { confirmingDelete = t.id; render(); });
+        card.appendChild(delBtn);
+      }
+
+      body.appendChild(card);
+    });
+
+    wrap.appendChild(body);
+    return wrap;
+  }
+
   // ---------------- setup screen ----------------
   function setNumPlayers(n) {
     var old = state.players;
@@ -434,11 +621,28 @@
 
   function renderSetup() {
     var wrap = el("div", {});
-    wrap.appendChild(el("header", {}, [
-      el("h1", { text: "Падел турнир" }),
+    var setupHeader = el("header", {}, [
+      el("h1", { text: "Новый турнир", style: "margin:38px 0 0; font-size:19px; font-weight:700; position:relative; z-index:1;" }),
       el("p", { text: "Настройте формат — сетка соберётся сама" })
-    ]));
+    ]);
+    var backBtn = el("button", {
+      text: "‹ Турниры",
+      style: "position:absolute; left:16px; top:20px; z-index:2; background:rgba(255,255,255,0.18); border:none; color:#fff; font-size:12.5px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer;"
+    });
+    backBtn.addEventListener("click", function() { screen = "home"; render(); });
+    setupHeader.appendChild(backBtn);
+    wrap.appendChild(setupHeader);
     var body = el("div", { class: "setup" });
+
+    // name
+    var nameCard = el("div", { class: "setup-card" });
+    nameCard.appendChild(el("h3", { text: "Название турнира" }));
+    var nameInput = el("input", { type: "text", placeholder: "Например: Пятница у Padel Point" });
+    nameInput.value = state.name || "";
+    nameInput.addEventListener("input", function(e) { state.name = e.target.value; });
+    nameCard.appendChild(nameInput);
+    nameCard.appendChild(el("p", { style: "font-size:12px;color:var(--text-dim);margin:8px 0 0;", text: "Можно не заполнять — тогда подставится дата" }));
+    body.appendChild(nameCard);
 
     // mode
     var modeCard = el("div", { class: "setup-card" });
@@ -545,9 +749,23 @@
   function renderHeader() {
     var modeLabel = state.mode === "team" ? "команды фикс." : "напарники меняются";
     var h = el("header", {}, [
-      el("h1", { text: "Падел турнир" }),
+      el("h1", { text: tournamentTitle(state) }),
       el("p", { text: state.numPlayers + " игроков · " + numCourts() + " корта · " + state.numRounds + " раундов · " + modeLabel })
     ]);
+
+    var backBtn = el("button", {
+      text: "‹ Турниры",
+      style: "position:absolute; left:16px; top:20px; z-index:2; background:rgba(255,255,255,0.18); border:none; color:#fff; font-size:12.5px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer;"
+    });
+    backBtn.addEventListener("click", function() {
+      saveState();
+      screen = "home";
+      state.editingNames = false;
+      confirmingReset = false;
+      render();
+    });
+    h.appendChild(backBtn);
+
     var editBtn = el("button", {
       text: state.editingNames ? "Готово" : "Имена",
       style: "position:absolute; right:16px; top:20px; z-index:2; background:rgba(255,255,255,0.18); border:none; color:#fff; font-size:12.5px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer;"
@@ -558,6 +776,8 @@
       render();
     });
     h.appendChild(editBtn);
+
+    h.querySelector("h1").setAttribute("style", "margin:38px 0 0; font-size:19px; font-weight:700; position:relative; z-index:1;");
     return h;
   }
 
@@ -718,19 +938,16 @@
     view.appendChild(roundsBox);
 
     if (!confirmingReset) {
-      var resetBtn = el("button", { class: "btn-secondary", text: "Начать новый турнир" });
+      var resetBtn = el("button", { class: "btn-secondary", text: "Очистить результаты этого турнира" });
       resetBtn.addEventListener("click", function() { confirmingReset = true; render(); });
       view.appendChild(resetBtn);
     } else {
-      view.appendChild(el("p", { style: "font-size:13px;color:var(--danger);text-align:center;margin:16px 0 10px;font-weight:600;", text: "Точно сбросить всё и начать заново?" }));
+      view.appendChild(el("p", { style: "font-size:13px;color:var(--danger);text-align:center;margin:16px 0 10px;font-weight:600;", text: "Стереть весь внесённый счёт? Составы и настройки останутся." }));
       var row = el("div", { style: "display:flex; gap:10px;" });
-      var yesBtn = el("button", { text: "Да, сбросить всё", style: "flex:1; padding:12px; border-radius:12px; border:none; background:var(--danger); color:#fff; font-size:14.5px; font-weight:600; cursor:pointer;" });
+      var yesBtn = el("button", { text: "Да, очистить", style: "flex:1; padding:12px; border-radius:12px; border:none; background:var(--danger); color:#fff; font-size:14.5px; font-weight:600; cursor:pointer;" });
       yesBtn.addEventListener("click", function() {
-        state = {
-          started: false, editingNames: false, mode: "individual",
-          numPlayers: 12, numRounds: 11, players: emptyNames(12),
-          teams: defaultTeams(12), pairings: {}, scores: {}, activeTab: "round-0"
-        };
+        state.scores = {};
+        state.activeTab = "round-0";
         confirmingReset = false;
         saveState();
         render();
