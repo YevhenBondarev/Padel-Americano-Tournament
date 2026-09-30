@@ -174,6 +174,7 @@
     if (mode === "team") return Math.max(1, Math.floor(numPlayers / 2) - 1);
     return Math.max(1, numPlayers - 1);
   }
+  function isMexicano() { return state.mode === "mexicano"; }
 
   function newTournament() {
     return {
@@ -184,7 +185,7 @@
       started: false,
       finished: false,
       editingNames: false,
-      mode: "individual",       // "individual" | "team"
+      mode: "individual",       // "individual" | "team" | "mexicano"
       numPlayers: 12,
       numRounds: 11,
       players: emptyNames(12),
@@ -299,6 +300,7 @@
 
   function buildDefaultPairings() {
     var p = {};
+    if (isMexicano()) return p; // mexicano pairings are derived from live standings
     if (state.mode === "team") {
       var rounds = generateTeamRounds(numTeams(), state.numRounds);
       for (var r = 0; r < rounds.length; r++) {
@@ -317,7 +319,57 @@
     return p;
   }
 
+  // ---- mexicano: pairings follow the live standings ----
+  // Round 1 seeds by the order names were entered; every later round sorts by
+  // points so far and puts ranks 1-4 on court 1 (1+4 vs 2+3), 5-8 on court 2, etc.
+  var mexCache = null;
+  function invalidateMex() { mexCache = null; }
+
+  function mexicanoRun() {
+    var n = state.numPlayers, courts = numCourts(), last = state.numRounds - 1;
+    var totals = {}, wins = {};
+    for (var i = 0; i < n; i++) { totals[i] = 0; wins[i] = 0; }
+    var out = {};
+    for (var r = 0; r <= last; r++) {
+      var order = [];
+      for (var j = 0; j < n; j++) order.push(j);
+      if (r > 0) {
+        order.sort(function(a, b) { return totals[b] - totals[a] || wins[b] - wins[a] || a - b; });
+      }
+      out[r] = {};
+      for (var c = 0; c < courts; c++) {
+        var stored = state.pairings && state.pairings[r] && state.pairings[r][c];
+        var pairing;
+        if (stored) {
+          pairing = stored;
+        } else {
+          var g = order.slice(c * 4, c * 4 + 4);
+          pairing = [[g[0], g[3]], [g[1], g[2]]];
+        }
+        out[r][c] = pairing;
+        if (r < last) {
+          var sA = getScore(r, c, 0), sB = getScore(r, c, 1);
+          if (sA !== "" && sB !== "") {
+            sA = Number(sA); sB = Number(sB);
+            pairing[0].forEach(function(p) { totals[p] += sA; });
+            pairing[1].forEach(function(p) { totals[p] += sB; });
+            if (sA > sB) pairing[0].forEach(function(p) { wins[p] += 1; });
+            else if (sB > sA) pairing[1].forEach(function(p) { wins[p] += 1; });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function mexicanoPairing(r, c) {
+    if (!mexCache) mexCache = mexicanoRun();
+    if (mexCache[r] && mexCache[r][c]) return mexCache[r][c];
+    return [[0, 1], [2, 3]];
+  }
+
   function generatedPairing(r, c) {
+    if (isMexicano()) return mexicanoPairing(r, c);
     if (state.mode === "team") {
       var tRounds = generateTeamRounds(numTeams(), r + 1);
       var tr = tRounds[r];
@@ -338,6 +390,7 @@
     if (!state.pairings[r]) state.pairings[r] = {};
     if (!state.pairings[r][c]) state.pairings[r][c] = getPairing(r, c).map(function(t) { return t.slice(); });
     state.pairings[r][c][teamIdx][slotIdx] = Number(val);
+    invalidateMex();
     saveState();
   }
   function setTeamPairing(r, c, side, val) {
@@ -374,6 +427,7 @@
     if (!state.scores[roundIdx]) state.scores[roundIdx] = {};
     if (!state.scores[roundIdx][courtIdx]) state.scores[roundIdx][courtIdx] = [null, null];
     state.scores[roundIdx][courtIdx][side] = val === "" ? null : Number(val);
+    invalidateMex();
     saveState();
   }
 
@@ -444,6 +498,7 @@
   function render() {
     var app = document.getElementById("app");
     app.innerHTML = "";
+    invalidateMex();
 
     if (screen === "home") { app.appendChild(renderHome()); return; }
 
@@ -537,7 +592,7 @@
       }
 
       var s = tournamentSummary(t);
-      var modeLabel = t.mode === "team" ? "командный" : "одиночный";
+      var modeLabel = t.mode === "team" ? "командный" : (t.mode === "mexicano" ? "мексикано" : "одиночный");
 
       var titleRow = el("div", { style: "display:flex; align-items:flex-start; justify-content:space-between; gap:10px;" });
       var titleBox = el("div", { style: "flex:1; min-width:0;" });
@@ -648,12 +703,22 @@
     var modeCard = el("div", { class: "setup-card" });
     modeCard.appendChild(el("h3", { text: "Формат турнира" }));
     var modeRow = el("div", { class: "choice-row" });
-    [["individual", "Американо — меняются напарники"], ["team", "Американо — команды фиксированы"]].forEach(function(m) {
+    [
+      ["individual", "Американо — меняются напарники"],
+      ["team", "Американо — команды фиксированы"],
+      ["mexicano", "Мексикано — пары по рейтингу"]
+    ].forEach(function(m) {
       var b = el("button", { class: "choice-btn wide" + (state.mode === m[0] ? " active" : ""), text: m[1] });
       b.addEventListener("click", function() { setMode(m[0]); render(); });
       modeRow.appendChild(b);
     });
     modeCard.appendChild(modeRow);
+    if (isMexicano()) {
+      modeCard.appendChild(el("p", {
+        style: "font-size:12px;color:var(--text-dim);margin:10px 0 0;",
+        text: "Первый раунд — по порядку имён, дальше каждый раунд пары пересобираются по набранным очкам: 1-й с 4-м против 2-го с 3-м на верхнем корте и так далее."
+      }));
+    }
     body.appendChild(modeCard);
 
     // participant count
@@ -677,15 +742,26 @@
     var roundsCard = el("div", { class: "setup-card" });
     roundsCard.appendChild(el("h3", { text: "Раундов" }));
     var circleRow = el("div", { class: "choice-row", style: "margin-bottom:10px;" });
-    [1, 2, 3].forEach(function(circles) {
-      var total = baseRounds * circles;
-      var b = el("button", {
-        class: "choice-btn" + (state.numRounds === total ? " active" : ""),
-        text: circles + (circles === 1 ? " круг" : " круга") + " · " + total
+    if (isMexicano()) {
+      [5, 8, baseRounds].filter(function(v, i, a) { return a.indexOf(v) === i; }).forEach(function(total) {
+        var b = el("button", {
+          class: "choice-btn" + (state.numRounds === total ? " active" : ""),
+          text: total + " раундов"
+        });
+        b.addEventListener("click", function() { state.numRounds = total; render(); });
+        circleRow.appendChild(b);
       });
-      b.addEventListener("click", function() { state.numRounds = total; render(); });
-      circleRow.appendChild(b);
-    });
+    } else {
+      [1, 2, 3].forEach(function(circles) {
+        var total = baseRounds * circles;
+        var b = el("button", {
+          class: "choice-btn" + (state.numRounds === total ? " active" : ""),
+          text: circles + (circles === 1 ? " круг" : " круга") + " · " + total
+        });
+        b.addEventListener("click", function() { state.numRounds = total; render(); });
+        circleRow.appendChild(b);
+      });
+    }
     roundsCard.appendChild(circleRow);
     var roundsInput = el("input", { type: "number", min: "1", max: "60" });
     roundsInput.value = state.numRounds;
@@ -696,7 +772,9 @@
     roundsCard.appendChild(roundsInput);
     roundsCard.appendChild(el("p", {
       style: "font-size:12px;color:var(--text-dim);margin:8px 0 0;",
-      text: "Один полный круг — " + baseRounds + " раунд(ов). Можно вписать любое своё число, сетка продолжится по кругу."
+      text: isMexicano()
+        ? "В мексикано число раундов задаёте вы — сетка пересобирается после каждого."
+        : "Один полный круг — " + baseRounds + " раунд(ов). Можно вписать любое своё число, сетка продолжится по кругу."
     }));
     body.appendChild(roundsCard);
 
@@ -747,7 +825,7 @@
 
   // ---------------- header / name editor ----------------
   function renderHeader() {
-    var modeLabel = state.mode === "team" ? "команды фикс." : "напарники меняются";
+    var modeLabel = state.mode === "team" ? "команды фикс." : (isMexicano() ? "мексикано" : "напарники меняются");
     var h = el("header", {}, [
       el("h1", { text: tournamentTitle(state) }),
       el("p", { text: state.numPlayers + " игроков · " + numCourts() + " корта · " + state.numRounds + " раундов · " + modeLabel })
@@ -837,8 +915,25 @@
 
   function renderRound(roundIdx) {
     var view = el("div", { class: "round-view" });
-    var hint = state.mode === "team" ? "выберите, какие команды играют на корте" : "выберите пары как в Raketo";
+    var hint = state.mode === "team"
+      ? "выберите, какие команды играют на корте"
+      : (isMexicano() ? "пары расставлены по рейтингу, можно поправить вручную" : "выберите пары как в Raketo");
     view.appendChild(el("p", { class: "round-title", text: "Раунд " + (roundIdx + 1) + " из " + state.numRounds + " — " + hint + " и впишите счёт" }));
+
+    if (isMexicano() && state.pairings && state.pairings[roundIdx]) {
+      var recalcBtn = el("button", {
+        class: "nav-btn",
+        text: "Вернуть пары по рейтингу",
+        style: "width:100%; margin-bottom:12px;"
+      });
+      recalcBtn.addEventListener("click", function() {
+        delete state.pairings[roundIdx];
+        invalidateMex();
+        saveState();
+        render();
+      });
+      view.appendChild(recalcBtn);
+    }
 
     var dupes = roundDuplicates(roundIdx);
     if (dupes.length) {
